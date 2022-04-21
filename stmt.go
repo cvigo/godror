@@ -326,7 +326,7 @@ func (st *statement) closeNotLocking() error {
 		}
 	}
 	if dpiStmt.refCount > 0 {
-		C.dpiStmt_release(dpiStmt)
+		dpiStmt_release(dpiStmt)
 	}
 	if c == nil {
 		return driver.ErrBadConn
@@ -423,15 +423,15 @@ func (st *statement) ExecContext(ctx context.Context, args []driver.NamedValue) 
 		mode |= C.DPI_MODE_EXEC_COMMIT_ON_SUCCESS
 	}
 	if st.DeleteFromCache() {
-		C.dpiStmt_deleteFromCache(st.dpiStmt)
+		dpiStmt_deleteFromCache(st.dpiStmt)
 	}
 	// execute
 	var f func() C.int
 	many := !st.PlSQLArrays() && st.arrLen > 0
 	if many {
-		f = func() C.int { return C.dpiStmt_executeMany(st.dpiStmt, mode, C.uint32_t(st.arrLen)) }
+		f = func() C.int { return dpiStmt_executeMany(st.dpiStmt, mode, C.uint32_t(st.arrLen)) }
 	} else {
-		f = func() C.int { return C.dpiStmt_execute(st.dpiStmt, mode, nil) }
+		f = func() C.int { return dpiStmt_execute(st.dpiStmt, mode, nil) }
 	}
 	for i := 0; i < 3; i++ {
 		if logger != nil {
@@ -504,7 +504,7 @@ func (st *statement) ExecContext(ctx context.Context, args []driver.NamedValue) 
 		}
 	}
 	var count C.uint64_t
-	if st.checkExec(func() C.int { return C.dpiStmt_getRowCount(st.dpiStmt, &count) }) != nil {
+	if st.checkExec(func() C.int { return dpiStmt_getRowCount(st.dpiStmt, &count) }) != nil {
 		return nil, nil
 	}
 	return driver.RowsAffected(count), nil
@@ -580,12 +580,12 @@ func (st *statement) queryContextNotLocked(ctx context.Context, args []driver.Na
 		mode |= C.DPI_MODE_EXEC_COMMIT_ON_SUCCESS
 	}
 	// set Prefetch Parameters before execute
-	C.dpiStmt_setFetchArraySize(st.dpiStmt, C.uint32_t(st.FetchArraySize()))
-	C.dpiStmt_setPrefetchRows(st.dpiStmt, C.uint32_t(st.PrefetchCount()))
+	dpiStmt_setFetchArraySize(st.dpiStmt, C.uint32_t(st.FetchArraySize()))
+	dpiStmt_setPrefetchRows(st.dpiStmt, C.uint32_t(st.PrefetchCount()))
 
 	// execute
 	var colCount C.uint32_t
-	f := func() C.int { return C.dpiStmt_execute(st.dpiStmt, mode, &colCount) }
+	f := func() C.int { return dpiStmt_execute(st.dpiStmt, mode, &colCount) }
 	for i := 0; i < 3; i++ {
 		if err = st.checkExec(f); err == nil {
 			break
@@ -633,7 +633,7 @@ func (st *statement) NumInput() int {
 	st.Lock()
 	defer st.Unlock()
 	var cnt C.uint32_t
-	if err := st.checkExec(func() C.int { return C.dpiStmt_getBindCount(st.dpiStmt, &cnt) }); err != nil {
+	if err := st.checkExec(func() C.int { return dpiStmt_getBindCount(st.dpiStmt, &cnt) }); err != nil {
 		if logger != nil {
 			logger.Log("msg", "getBindCount", "error", err)
 		}
@@ -670,7 +670,7 @@ func (st *statement) NumInput() int {
 
 	names := make([]*C.char, int(cnt))
 	lengths := make([]C.uint32_t, int(cnt))
-	if err := st.checkExec(func() C.int { return C.dpiStmt_getBindNames(st.dpiStmt, &cnt, &names[0], &lengths[0]) }); err != nil {
+	if err := st.checkExec(func() C.int { return dpiStmt_getBindNames(st.dpiStmt, &cnt, &names[0], &lengths[0]) }); err != nil {
 		if logger != nil {
 			logger.Log("msg", "getBindNames", "error", err)
 		}
@@ -903,7 +903,7 @@ func (st *statement) bindVars(args []driver.NamedValue, logger Logger) error {
 	if !named {
 		for i, v := range st.vars {
 			i, v := i, v
-			if err := st.checkExecNoLOT(func() C.int { return C.dpiStmt_bindByPos(st.dpiStmt, C.uint32_t(i+1), v) }); err != nil {
+			if err := st.checkExecNoLOT(func() C.int { return dpiStmt_bindByPos(st.dpiStmt, C.uint32_t(i+1), v) }); err != nil {
 				return fmt.Errorf("bindByPos[%d]: %w", i, err)
 			}
 		}
@@ -916,7 +916,7 @@ func (st *statement) bindVars(args []driver.NamedValue, logger Logger) error {
 		}
 		//fmt.Printf("bindByName(%q)\n", name)
 		cName := C.CString(name)
-		err := st.checkExecNoLOT(func() C.int { return C.dpiStmt_bindByName(st.dpiStmt, cName, C.uint32_t(len(name)), st.vars[i]) })
+		err := st.checkExecNoLOT(func() C.int { return dpiStmt_bindByName(st.dpiStmt, cName, C.uint32_t(len(name)), st.vars[i]) })
 		C.free(unsafe.Pointer(cName))
 		if err != nil {
 			return fmt.Errorf("bindByName[%q]: %w", name, err)
@@ -2388,7 +2388,7 @@ func (st *statement) dataGetStmtC(row *driver.Rows, data *C.dpiData) error {
 
 	logger := getLogger()
 	var n C.uint32_t
-	if err := st.checkExec(func() C.int { return C.dpiStmt_getNumQueryColumns(st2.dpiStmt, &n) }); err != nil {
+	if err := st.checkExec(func() C.int { return dpiStmt_getNumQueryColumns(st2.dpiStmt, &n) }); err != nil {
 		err = fmt.Errorf("dataGetStmtC.getNumQueryColumns: %+v: %w", err, io.EOF)
 		*row = &rows{err: err}
 		if logger != nil {
@@ -2502,7 +2502,7 @@ func (c *conn) dataSetLOBOne(dv *C.dpiVar, data []C.dpiData, i int, L Lob) error
 	}
 
 	var lob *C.dpiLob
-	if err := c.checkExec(func() C.int { return C.dpiConn_newTempLob(c.dpiConn, typ, &lob) }); err != nil {
+	if err := c.checkExec(func() C.int { return dpiConn_newTempLob(c.dpiConn, typ, &lob) }); err != nil {
 		return fmt.Errorf("newTempLob(typ=%d): %w", typ, err)
 	}
 	var chunkSize C.uint32_t
@@ -2898,7 +2898,7 @@ func (st *statement) openRows(colCount int) (*rows, error) {
 	logger := getLogger()
 	for i := 0; i < colCount; i++ {
 		if err := st.checkExecNoLOT(func() C.int {
-			return C.dpiStmt_getQueryInfo(st.dpiStmt, C.uint32_t(i+1), &info)
+			return dpiStmt_getQueryInfo(st.dpiStmt, C.uint32_t(i+1), &info)
 		}); err != nil {
 			return nil, fmt.Errorf("getQueryInfo[%d]: %w", i, err)
 		}
@@ -2958,13 +2958,13 @@ func (st *statement) openRows(colCount int) (*rows, error) {
 		}
 
 		if err = st.checkExecNoLOT(func() C.int {
-			return C.dpiStmt_define(st.dpiStmt, C.uint32_t(i+1), r.vars[i])
+			return dpiStmt_define(st.dpiStmt, C.uint32_t(i+1), r.vars[i])
 		}); err != nil {
 			return nil, fmt.Errorf("define[%d]: %w", i, err)
 		}
 	}
 	if err := st.checkExecNoLOT(func() C.int {
-		return C.dpiStmt_addRef(st.dpiStmt)
+		return dpiStmt_addRef(st.dpiStmt)
 	}); err != nil {
 		return &r, fmt.Errorf("dpiStmt_addRef: %w", err)
 	}

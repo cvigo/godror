@@ -86,7 +86,7 @@ func (r *rows) Close() error {
 		if logger := getLogger(); logger != nil {
 			logger.Log("msg", "rows Close", "nextRs", fmt.Sprintf("%p", nextRs))
 		}
-		C.dpiStmt_release(nextRs)
+		dpiStmt_release(nextRs)
 	}
 	if st == nil {
 		return nil
@@ -95,7 +95,7 @@ func (r *rows) Close() error {
 	if fromData || st.dpiStmt.refCount < 2 {
 		return st.Close()
 	}
-	C.dpiStmt_release(st.dpiStmt)
+	dpiStmt_release(st.dpiStmt)
 	return nil
 }
 
@@ -331,7 +331,7 @@ func (r *rows) Next(dest []driver.Value) error {
 			start = time.Now()
 		}
 		err := r.statement.checkExecNoLOT(func() C.int {
-			return C.dpiStmt_fetchRows(r.dpiStmt, maxRows, &r.bufferRowIndex, &r.fetched, &moreRows)
+			return dpiStmt_fetchRows(r.dpiStmt, maxRows, &r.bufferRowIndex, &r.fetched, &moreRows)
 		})
 		failed := err != nil
 		if debugRowsNext {
@@ -580,7 +580,7 @@ func (r *rows) Next(dest []driver.Value) error {
 			}
 			var colCount C.uint32_t
 			if err := r.statement.checkExecNoLOT(func() C.int {
-				return C.dpiStmt_getNumQueryColumns(st.dpiStmt, &colCount)
+				return dpiStmt_getNumQueryColumns(st.dpiStmt, &colCount)
 			}); err != nil {
 				if logger != nil {
 					logger.Log("msg", "Next.getNumQueryColumns", "st", fmt.Sprintf("%p", st.dpiStmt), "error", err)
@@ -722,10 +722,10 @@ func (r *rows) getImplicitResult() {
 		st = r.statement
 		r.origSt = st
 	}
-	if err := r.checkExec(func() C.int { return C.dpiStmt_getImplicitResult(st.dpiStmt, &r.nextRs) }); err != nil {
+	if err := r.checkExec(func() C.int { return dpiStmt_getImplicitResult(st.dpiStmt, &r.nextRs) }); err != nil {
 		r.nextRsErr = fmt.Errorf("getImplicitResult: %w", err)
 	}
-	C.dpiStmt_addRef(r.nextRs)
+	dpiStmt_addRef(r.nextRs)
 }
 func (r *rows) HasNextResultSet() bool {
 	if r == nil || r.statement == nil || r.conn == nil {
@@ -755,7 +755,7 @@ func (r *rows) NextResultSet() error {
 
 	var n C.uint32_t
 	logger := getLogger()
-	if err := r.checkExec(func() C.int { return C.dpiStmt_getNumQueryColumns(st.dpiStmt, &n) }); err != nil {
+	if err := r.checkExec(func() C.int { return dpiStmt_getNumQueryColumns(st.dpiStmt, &n) }); err != nil {
 		err = fmt.Errorf("getNumQueryColumns: %+v: %w", err, io.EOF)
 		if logger != nil {
 			logger.Log("msg", "NextResultSet.getNumQueryColumns", "st", fmt.Sprintf("%p", st.dpiStmt), "error", err)

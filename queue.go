@@ -91,7 +91,7 @@ func NewQueue(ctx context.Context, execer Execer, name string, payloadObjectType
 	}
 	value := C.CString(name)
 	err = Q.conn.checkExec(func() C.int {
-		return C.dpiConn_newQueue(Q.conn.dpiConn, value, C.uint(len(name)), payloadType, &Q.dpiQueue)
+		return dpiConn_newQueue(Q.conn.dpiConn, value, C.uint(len(name)), payloadType, &Q.dpiQueue)
 	})
 	C.free(unsafe.Pointer(value))
 	if err != nil {
@@ -280,7 +280,7 @@ func (Q *Queue) Enqueue(messages []Message) error {
 		}
 	}()
 	for i, m := range messages {
-		if C.dpiConn_newMsgProps(Q.conn.dpiConn, &props[i]) == C.DPI_FAILURE {
+		if dpiConn_newMsgProps(Q.conn.dpiConn, &props[i]) == C.DPI_FAILURE {
 			return fmt.Errorf("newMsgProps: %w", Q.conn.getError())
 		}
 		if err := m.toOra(Q.conn.drv, props[i]); err != nil {

@@ -245,7 +245,7 @@ func (p *connPool) Purge() {
 	dpiPool := p.dpiPool
 	p.dpiPool = nil
 	if dpiPool != nil {
-		C.dpiPool_close(dpiPool, C.DPI_MODE_POOL_CLOSE_FORCE)
+		dpiPool_close(dpiPool, C.DPI_MODE_POOL_CLOSE_FORCE)
 	}
 }
 
@@ -253,7 +253,7 @@ func (p *connPool) Close() error {
 	dpiPool := p.dpiPool
 	p.dpiPool = nil
 	if dpiPool != nil {
-		C.dpiPool_release(dpiPool)
+		dpiPool_release(dpiPool)
 	}
 	return nil
 }
@@ -571,7 +571,7 @@ func (d *drv) acquireConn(pool *connPool, P commonAndConnParams) (*C.dpiConn, er
 	// create ODPI-C connection
 	var dc *C.dpiConn
 	if err := d.checkExec(func() C.int {
-		return C.dpiConn_create(
+		return dpiConn_create(
 			d.dpiContext,
 			cUsername, C.uint32_t(len(username)),
 			cPassword, C.uint32_t(len(password)),
@@ -775,7 +775,7 @@ func (d *drv) createPool(P commonAndPoolParams) (*connPool, error) {
 			fmt.Sprintf("%#v", poolCreateParams))
 	}
 	if err := d.checkExec(func() C.int {
-		return C.dpiPool_create(
+		return dpiPool_create(
 			d.dpiContext,
 			cUsername, C.uint32_t(len(P.Username)),
 			cPassword, C.uint32_t(P.Password.Len()),
@@ -797,7 +797,7 @@ func (d *drv) createPool(P commonAndPoolParams) (*connPool, error) {
 			stmtCacheSize = C.uint32_t(P.StmtCacheSize)
 		}
 	}
-	C.dpiPool_setStmtCacheSize(dp, stmtCacheSize)
+	dpiPool_setStmtCacheSize(dp, stmtCacheSize)
 
 	return &connPool{dpiPool: dp, params: P}, nil
 }
@@ -824,19 +824,19 @@ func (d *drv) getPoolStats(p *connPool) (stats PoolStats, err error) {
 	runtime.LockOSThread()
 	defer runtime.UnlockOSThread()
 	var u C.uint32_t
-	if C.dpiPool_getBusyCount(p.dpiPool, &u) != C.DPI_FAILURE {
+	if dpiPool_getBusyCount(p.dpiPool, &u) != C.DPI_FAILURE {
 		stats.Busy = uint32(u)
 	}
-	if C.dpiPool_getOpenCount(p.dpiPool, &u) != C.DPI_FAILURE {
+	if dpiPool_getOpenCount(p.dpiPool, &u) != C.DPI_FAILURE {
 		stats.Open = uint32(u)
 	}
-	if C.dpiPool_getMaxLifetimeSession(p.dpiPool, &u) != C.DPI_FAILURE {
+	if dpiPool_getMaxLifetimeSession(p.dpiPool, &u) != C.DPI_FAILURE {
 		stats.MaxLifetime = time.Duration(u) * time.Second
 	}
-	if C.dpiPool_getTimeout(p.dpiPool, &u) != C.DPI_FAILURE {
+	if dpiPool_getTimeout(p.dpiPool, &u) != C.DPI_FAILURE {
 		stats.Timeout = time.Duration(u) * time.Second
 	}
-	if C.dpiPool_getWaitTimeout(p.dpiPool, &u) != C.DPI_FAILURE {
+	if dpiPool_getWaitTimeout(p.dpiPool, &u) != C.DPI_FAILURE {
 		stats.WaitTimeout = time.Duration(u) * time.Millisecond
 		return stats, nil
 	}

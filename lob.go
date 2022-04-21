@@ -447,7 +447,7 @@ func (c *conn) NewTempLob(isClob bool) (*DirectLob, error) {
 		typ = C.DPI_ORACLE_TYPE_CLOB
 	}
 	lob := DirectLob{drv: c.drv, isClob: isClob}
-	if err := c.checkExec(func() C.int { return C.dpiConn_newTempLob(c.dpiConn, typ, &lob.dpiLob) }); err != nil {
+	if err := c.checkExec(func() C.int { return dpiConn_newTempLob(c.dpiConn, typ, &lob.dpiLob) }); err != nil {
 		return nil, fmt.Errorf("newTempLob: %w", err)
 	}
 	return &lob, nil

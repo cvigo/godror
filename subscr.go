@@ -249,7 +249,7 @@ func (c *conn) NewSubscription(name string, cb func(Event), options ...Subscript
 	dpiSubscr := (*C.dpiSubscr)(C.malloc(C.sizeof_void))
 
 	if err := c.checkExec(func() C.int {
-		return C.dpiConn_subscribe(c.dpiConn, params, (**C.dpiSubscr)(unsafe.Pointer(&dpiSubscr)))
+		return dpiConn_subscribe(c.dpiConn, params, (**C.dpiSubscr)(unsafe.Pointer(&dpiSubscr)))
 	}); err != nil {
 		C.free(unsafe.Pointer(dpiSubscr))
 		err = fmt.Errorf("newSubscription: %w", err)
@@ -276,15 +276,15 @@ func (s *Subscription) Register(qry string, params ...interface{}) error {
 	if C.dpiSubscr_prepareStmt(s.dpiSubscr, cQry, C.uint32_t(len(qry)), &dpiStmt) == C.DPI_FAILURE {
 		return fmt.Errorf("prepareStmt[%p]: %w", s.dpiSubscr, s.conn.getError())
 	}
-	defer func() { C.dpiStmt_release(dpiStmt) }()
+	defer func() { dpiStmt_release(dpiStmt) }()
 
 	mode := C.dpiExecMode(C.DPI_MODE_EXEC_DEFAULT)
 	var qCols C.uint32_t
-	if C.dpiStmt_execute(dpiStmt, mode, &qCols) == C.DPI_FAILURE {
+	if dpiStmt_execute(dpiStmt, mode, &qCols) == C.DPI_FAILURE {
 		return fmt.Errorf("executeStmt: %w", s.conn.getError())
 	}
 	var queryID C.uint64_t
-	if C.dpiStmt_getSubscrQueryId(dpiStmt, &queryID) == C.DPI_FAILURE {
+	if dpiStmt_getSubscrQueryId(dpiStmt, &queryID) == C.DPI_FAILURE {
 		return fmt.Errorf("getSubscrQueryId: %w", s.conn.getError())
 	}
 	logger := getLogger()
@@ -310,7 +310,7 @@ func (s *Subscription) Close() error {
 	if dpiSubscr == nil || conn == nil || conn.dpiConn == nil {
 		return nil
 	}
-	if err := conn.checkExec(func() C.int { return C.dpiConn_unsubscribe(conn.dpiConn, dpiSubscr) }); err != nil {
+	if err := conn.checkExec(func() C.int { return dpiConn_unsubscribe(conn.dpiConn, dpiSubscr) }); err != nil {
 		return fmt.Errorf("close: %w", err)
 	}
 	return nil
