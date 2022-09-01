@@ -163,7 +163,9 @@ func (r MyTable) WriteObject(ctx context.Context) error {
 }
 
 func createPackages(ctx context.Context) error {
-	qry := []string{`CREATE OR REPLACE PACKAGE test_pkg_types AS
+	qry := []string{`
+	CREATE OR REPLACE PACKAGE test_pkg_types AS
+
 	TYPE my_other_record IS RECORD (
 		id    NUMBER(5),
 		txt   VARCHAR2(200)
@@ -173,9 +175,19 @@ func createPackages(ctx context.Context) error {
 		other test_pkg_types.my_other_record,
 		txt   VARCHAR2(200)
 	);
-	TYPE my_table IS
-		TABLE OF my_record;
-	END test_pkg_types;`,
+	TYPE my_table IS TABLE OF my_record;
+
+	TYPE number_list IS TABLE OF NUMBER(10);
+
+	TYPE osh_record IS RECORD (
+		id    NUMBER(5),
+		numbers test_pkg_types.number_list, 
+		rec test_pkg_types.my_record
+	);
+	TYPE osh_table IS TABLE OF osh_record;
+	
+	END test_pkg_types;
+	`,
 
 		`CREATE OR REPLACE PACKAGE test_pkg_sample AS
 	PROCEDURE test_record (
@@ -194,6 +206,11 @@ func createPackages(ctx context.Context) error {
 
 	PROCEDURE test_table_in (
 		tb IN OUT test_pkg_types.my_table
+	);
+	
+	PROCEDURE test_osh(
+		numbers in test_pkg_types.number_list,
+		res_list out test_pkg_types.osh_table
 	);
 
 	END test_pkg_sample;`,
@@ -249,6 +266,25 @@ func createPackages(ctx context.Context) error {
 	null;
 	END test_table_in;
 
+	PROCEDURE test_osh(
+		numbers in test_pkg_types.number_list,
+		res_list out test_pkg_types.osh_table
+	) 
+	AS
+		rec test_pkg_types.osh_record;
+	BEGIN
+		res_list := test_pkg_types.osh_table();
+				
+		rec.numbers := numbers;
+		
+		FOR i IN 1..3 LOOP
+			res_list.extend();
+			rec.id := i;
+			res_list(res_list.count) := rec;
+		END LOOP;
+
+	END test_osh;
+
 	END test_pkg_sample;`}
 
 	for _, ddl := range qry {
@@ -267,10 +303,39 @@ func dropPackages(ctx context.Context) {
 	testDb.ExecContext(ctx, `DROP PACKAGE test_pkg_sample`)
 }
 
-func TestPlSqlTypes(t *testing.T) {
-	t.Parallel()
+type objectStruct struct {
+	godror.ObjectTypeName `godror:"test_pkg_types.my_record" json:"-"`
+	ID                    int32  `godror:"ID"`
+	Txt                   string `godror:"TXT"`
+}
 
-	ctx, cancel := context.WithTimeout(testContext("PLSQLTypes"), 30*time.Second)
+type sliceStruct struct {
+	godror.ObjectTypeName `json:"-"`
+	ObjSlice              []objectStruct `godror:",type=test_pkg_types.my_table"`
+}
+
+type oshNumberList struct {
+	godror.ObjectTypeName `json:"-"`
+
+	NumberList []float64 `godror:",type=test_pkg_types.number_list"`
+}
+
+type oshStruct struct {
+	godror.ObjectTypeName `godror:"test_pkg_types.osh_record" json:"-"`
+
+	ID      int32         `godror:"ID"`
+	Numbers oshNumberList `godror:"NUMBERS,type=test_pkg_types.number_list"`
+	Record  objectStruct  `godror:"REC,type=test_pkg_types.my_record"`
+}
+
+type oshSliceStruct struct {
+	godror.ObjectTypeName `json:"-"`
+
+	List []oshStruct `godror:",type=test_pkg_types.osh_table"`
+}
+
+func TestPlSqlTypes(t *testing.T) {
+	ctx, cancel := context.WithTimeout(testContext("PlSqlTypes"), 30*time.Second)
 	defer cancel()
 
 	errOld := errors.New("client or server < 12")
@@ -310,6 +375,46 @@ func TestPlSqlTypes(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+
+	t.Run("Struct", func(t *testing.T) {
+		var s objectStruct
+		const qry = `begin test_pkg_sample.test_record(:1, :2, :3); end;`
+		_, err := cx.ExecContext(ctx, qry, 43, "abraka dabra", sql.Out{Dest: &s})
+		if err != nil {
+			t.Fatalf("%s: %+v", qry, err)
+		}
+		t.Logf("struct: %+v", s)
+	})
+
+	t.Run("Slice", func(t *testing.T) {
+		s := sliceStruct{ObjSlice: []objectStruct{{ID: 1, Txt: "first"}}}
+		const qry = `begin test_pkg_sample.test_table_in(:1); end;`
+		_, err := cx.ExecContext(ctx, qry, sql.Out{Dest: &s, In: true})
+		if err != nil {
+			t.Fatalf("%s: %+v", qry, err)
+		}
+		t.Logf("struct: %+v", s)
+	})
+
+	t.Run("Osh", func(t *testing.T) {
+		in := oshNumberList{NumberList: []float64{1, 2, 3}}
+		var out oshSliceStruct
+		const qry = `begin test_pkg_sample.test_osh(:1, :2); end;`
+		_, err := cx.ExecContext(ctx, qry, in, sql.Out{Dest: &out})
+		if err != nil {
+			t.Fatalf("%s: %+v", qry, err)
+		} else if len(out.List) == 0 {
+			t.Fatal("no records found")
+		} else if out.List[0].ID != 1 || len(out.List[0].Numbers.NumberList) == 0 {
+			t.Fatalf("wrong data from the array: %#v", out.List)
+		}
+		t.Logf("struct: %+v", out)
+		if j, e := json.Marshal(out); e != nil {
+			t.Fatalf("error during json conversion: %s", e)
+		} else {
+			t.Log("json marshaled: ", string(j))
+		}
+	})
 
 	t.Run("Record", func(t *testing.T) {
 		// you must have execute privilege on package and use uppercase
@@ -755,7 +860,7 @@ END;`
 		elt = data.GetObject()
 
 		t.Logf("elt[%d]: %s", i, elt)
-		for attr := range elt.Attributes {
+		for _, attr := range elt.AttributeNames() {
 			val, err := elt.Get(attr)
 			if err != nil {
 				if godror.DpiVersionNumber <= 30201 {
@@ -887,22 +992,27 @@ END;
 	if err != nil {
 		t.Fatal(err)
 	}
+	defer typ.Close()
 	if a_mcalist_i, err = typ.NewObject(); err != nil {
 		t.Fatal(err)
 	}
+	defer a_mcalist_i.Close()
 	if typ, err = godror.GetObjectType(ctx, conn, "test_cwo_rec_t"); err != nil {
 		t.Fatal("GetObjectType(test_cwo_rec_t):", err)
 	}
+	defer typ.Close()
 	elt, err := typ.NewObject()
 	if err != nil {
 		t.Fatalf("NewObject(%s): %+v", typ, err)
 	}
+	defer elt.Close()
 	if err = elt.Set("NUMBERPART1", "np1"); err != nil {
 		t.Fatal("set NUMBERPART1:", err)
 	}
 	if err = a_mcalist_i.Collection().Append(elt); err != nil {
 		t.Fatal("append to collection:", err)
 	}
+	elt.Close()
 
 	const qry = `BEGIN test_cwo_getSum(:v1,:v2,:v3,:v4,:v5,:v6,:v7,:v8,:v9); END;`
 	if _, err := conn.ExecContext(ctx, qry,
@@ -1232,6 +1342,7 @@ END;`},
 	if err != nil {
 		t.Fatal(err)
 	}
+	defer rs.Close()
 	t.Logf("rs: %#v", rs)
 
 	if _, err := stmt.ExecContext(ctx, "10212", sql.Out{Dest: &rs}); err != nil {
@@ -1259,10 +1370,12 @@ END;`},
 			t.Logf("year: %T(%#v) (%+v)", yearI, yearI, err)
 			year := yearI.(float64)
 			if !(err == nil && year == 2021) {
+				o.Close()
 				t.Errorf("got (%#v, %+v), wanted (2021, nil)", year, err)
 			}
 
 			m, err := o.AsMap(true)
+			o.Close()
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -1393,6 +1506,7 @@ END;`},
 			t.Fatal(err)
 		}
 		hs := hc.(*godror.ObjectCollection)
+		defer hs.Close()
 		length, err := hs.Len()
 		t.Logf("length: %d", length)
 		if err != nil {
@@ -1412,6 +1526,7 @@ END;`},
 				continue
 			}
 			statusI, err := o.Get("STATUS")
+			o.Close()
 			if err != nil {
 				t.Error(err)
 			}
@@ -1555,6 +1670,7 @@ func TestObjectFromMap(t *testing.T) {
 	if err = obj.ToJSON(&buf); err != nil {
 		t.Fatalf("ToJSON: %+v", err)
 	}
+	obj.Close()
 	if d := cmp.Diff(jsonString, buf.String()); d != "" {
 		t.Errorf("ToJSON: %s", d)
 	}
@@ -1626,6 +1742,7 @@ END;`,
 	if err != nil {
 		t.Fatal(err)
 	}
+	defer cO.Close()
 	t.Log(cOt)
 
 	if _, err = stmt.ExecContext(ctx,
@@ -1641,4 +1758,104 @@ END;`,
 		}
 		t.Log("map:", m)
 	}
+}
+
+func TestPlSQLNumSlice(t *testing.T) {
+	ctx, cancel := context.WithTimeout(testContext("PlSQLNumSlice"), 30*time.Second)
+	defer cancel()
+
+	name := "test_plsql_numslice" + tblSuffix
+	dropQry := `DROP PACKAGE ` + name
+	_, _ = testDb.ExecContext(ctx, dropQry)
+	defer func() { _, _ = testDb.ExecContext(context.Background(), dropQry) }()
+
+	for _, creQry := range []string{
+		`CREATE OR REPLACE PACKAGE ` + name + ` IS
+subtype type_Product_Code is varchar2(6);
+subtype type_Number_String is varchar2(20);
+type type_Product_Code_Array is table of type_Product_Code index by pls_integer;
+type type_Number_String_Array is table of type_Number_String index by pls_integer;
+
+FUNCTION Basket_Add_Product(
+  pProductCodeTable  in type_Product_Code_Array,
+  pVolumeTable       in type_Number_String_Array,
+  pCollectionIdTable in type_Number_String_Array
+) RETURN VARCHAR2;
+END;`,
+		`CREATE OR REPLACE PACKAGE BODY ` + name + ` IS
+
+FUNCTION Basket_Add_Product(
+  pProductCodeTable  in type_Product_Code_Array,
+  pVolumeTable       in type_Number_String_Array,
+  pCollectionIdTable in type_Number_String_Array
+) RETURN VARCHAR2 IS
+  v_out VARCHAR2(4000);
+BEGIN
+  v_out := pProductCodeTable.COUNT||','||pVolumeTable.COUNT||','||pCollectionIdTable.COUNT||CHR(10);
+  FOR i IN pProductCodeTable.FIRST .. pProductCodeTable.LAST LOOP
+    v_out := v_out||'pProductCodeTable('||i||')='||pProductCodeTable(i)||CHR(10);
+  END LOOP;
+
+  FOR i IN pVolumeTable.FIRST .. pVolumeTable.LAST LOOP
+    v_out := v_out||'pVolumeTable('||i||')='||pVolumeTable(i)||CHR(10);
+  END LOOP;
+
+  FOR i IN pCollectionIdTable.FIRST .. pCollectionIdTable.LAST LOOP
+    v_out := v_out||'pCollectionIdTable('||i||')='||pCollectionIdTable(i)||CHR(10);
+  END LOOP;
+   
+  RETURN(v_out);
+
+END;
+END;`,
+	} {
+		if _, err := testDb.ExecContext(ctx, creQry); err != nil {
+			t.Fatalf("%s: %+v", creQry, err)
+		}
+	}
+	errs, gcErr := godror.GetCompileErrors(ctx, testDb, false)
+	if gcErr != nil {
+		t.Error(gcErr)
+	} else if len(errs) != 0 {
+		t.Fatal(errs)
+	}
+
+	ExecProcedureVarChar := func(ctx context.Context, params ...interface{}) (result string, err error) {
+		defer func() {
+			if r := recover(); r != nil {
+				fmt.Println(r)
+				var ok bool
+				if err, ok = r.(error); !ok {
+					err = fmt.Errorf("Recover from ExecProcedure: %v", r)
+				}
+			}
+		}()
+
+		db := testDb
+
+		ctx, cancel := context.WithTimeout(ctx, time.Minute)
+		defer cancel()
+
+		var out string
+		requestParams := make([]interface{}, 0, 2+len(params))
+		requestParams = append(requestParams, godror.PlSQLArrays)
+		requestParams = append(requestParams, sql.Out{Dest: &out})
+		requestParams = append(requestParams, params...)
+		qry := "BEGIN :1 := " + name + ".basket_add_product(:2, :3, :4); END;"
+		_, err = db.ExecContext(ctx, qry, requestParams...)
+		if err != nil {
+			return "", fmt.Errorf("%s [%v]: %w", qry, requestParams, err)
+		}
+
+		return out, err
+	}
+
+	s, err := ExecProcedureVarChar(ctx,
+		[]string{"012345", "abcdef"},
+		[]string{"A", "B", "C"},
+		[]string{"f56d430cxx123", "le;ri';ghr", "asdasf", "rretwrt"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Log(s, len(s))
 }

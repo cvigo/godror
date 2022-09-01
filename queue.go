@@ -85,9 +85,8 @@ func NewQueue(ctx context.Context, execer Execer, name string, payloadObjectType
 	if payloadObjectTypeName != "" {
 		if Q.PayloadObjectType, err = Q.conn.GetObjectType(payloadObjectTypeName); err != nil {
 			return nil, err
-		} else {
-			payloadType = Q.PayloadObjectType.dpiObjectType
 		}
+		payloadType = Q.PayloadObjectType.dpiObjectType
 	}
 	value := C.CString(name)
 	err = Q.conn.checkExec(func() C.int {
@@ -158,7 +157,8 @@ func (Q *Queue) Close() error {
 func (Q *Queue) PurgeExpired(ctx context.Context) error {
 	const qry = `BEGIN 
   FOR row IN (
-    SELECT queue_table FROM all_queues
+    SELECT sys_context('USERENV', 'CURRENT_SCHEMA')||'.'||queue_table AS queue_table 
+	  FROM user_queues
 	  WHERE name = :1
   ) LOOP
     dbms_aqadm.purge_queue_table(row.queue_table, 'qtview.msg_state = ''EXPIRED''', NULL);

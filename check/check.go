@@ -1,4 +1,4 @@
-// Copyright 2021 The Godror Authors
+// Copyright 2021, 2022 The Godror Authors
 //
 //
 // SPDX-License-Identifier: UPL-1.0 OR Apache-2.0
@@ -13,7 +13,7 @@ import (
 	"go/ast"
 	"go/parser"
 	"go/token"
-	"io/ioutil"
+	"io"
 	"log"
 	"os"
 	"os/exec"
@@ -37,7 +37,7 @@ func Main() error {
 	flagVerbose := flag.Bool("v", false, "verbose logging")
 	flag.Parse()
 	if !*flagVerbose {
-		log.SetOutput(ioutil.Discard)
+		log.SetOutput(io.Discard)
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)

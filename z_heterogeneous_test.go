@@ -8,13 +8,42 @@ package godror_test
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"strings"
 	"testing"
 	"time"
 
 	godror "github.com/godror/godror"
+	"github.com/godror/godror/dsn"
 )
+
+func TestWrongPassword(t *testing.T) {
+	t.Parallel()
+	ctx, cancel := context.WithTimeout(testContext("WrongPassword"), 30*time.Second)
+	defer cancel()
+	P, err := godror.ParseConnString(testConStr)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for i := 0; i < 10; i++ {
+		for _, ok := range []bool{true, false} {
+			P2 := P
+			if !ok {
+				P2.Password = dsn.NewPassword(P2.Password.Secret() + "X")
+			}
+			db := sql.OpenDB(godror.NewConnector(P2))
+			err := db.PingContext(ctx)
+			db.Close()
+			if errors.Is(err, context.DeadlineExceeded) {
+				return
+			}
+			if ok != (err == nil) {
+				t.Errorf("%d. wanted %t got %+v", i, ok, err)
+			}
+		}
+	}
+}
 
 // Following are covered
 // - standalone=0
@@ -196,10 +225,23 @@ func TestContextWithUserPassw(t *testing.T) {
 		t.Fatal(fmt.Errorf("%s: %w", testHeterogeneousConStr, err))
 	}
 	defer testHeterogeneousDB.Close()
+	testHeterogeneousDB.SetMaxIdleConns(0)
 
-	ctx = godror.ContextWithUserPassw(ctx, username, password.Secret(), "")
-	if err := testHeterogeneousDB.PingContext(ctx); err != nil {
-		t.Fatal(err)
+	{
+		ctx := godror.ContextWithUserPassw(ctx, username, password.Secret(), "")
+		if err := testHeterogeneousDB.PingContext(ctx); err != nil {
+			t.Fatal(err)
+		}
+		t.Log(ctx)
 	}
-	t.Log(ctx)
+
+	{
+		ctx := godror.ContextWithUserPassw(ctx, username, password.String(), "")
+		err := testHeterogeneousDB.PingContext(ctx)
+		t.Logf("Ping with wrong password (%q): %+v", password.String(), err)
+		if err == nil {
+			t.Log(ctx)
+			t.Fatal("success with wrong password")
+		}
+	}
 }
